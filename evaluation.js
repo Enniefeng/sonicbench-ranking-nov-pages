@@ -7,6 +7,9 @@
   if (!S || !R || !root) return;
 
   const dimensionByKey = new Map(R.dimensions.map((dimension) => [dimension.key, dimension]));
+  const HISTORY_PREFIX = "sonicbench_nov_annotation_history_v1:";
+  const HISTORY_LIMIT = 12;
+  let draftTimer = null;
   let draggingRankId = "";
   let rankInsertion = null;
   let rankDropCommitted = false;
@@ -27,7 +30,8 @@
     baseline: null,
     sourceResult: null,
     result: null,
-    validation: []
+    validation: [],
+    restoredDraft: false
   };
 
   function candidateLabel(index) { return `候选 ${String(index + 1).padStart(2, "0")}`; }
@@ -67,6 +71,7 @@
     state.startedAt = new Date().toISOString();
     state.result = null;
     state.validation = [];
+    state.restoredDraft = false;
   }
 
   function validateTask(task) {
@@ -88,11 +93,19 @@
     const parsed = S.safeJson(state.paste);
     if (parsed.error) return showImportErrors([`JSON 无法解析：${parsed.error}`]);
     if (mode === "annotate") {
-      const errors = validateTask(parsed.value);
+      const suppliedResult = parsed.value?.schema_version === S.RESULT_SCHEMA && parsed.value?.work_order ? parsed.value : null;
+      const task = suppliedResult ? suppliedResult.work_order : parsed.value;
+      const errors = validateTask(task);
       if (errors.length) return showImportErrors(errors);
-      initializeTask(parsed.value);
-      state.baseline = null;
-      state.sourceResult = null;
+      initializeTask(task);
+      if (suppliedResult) {
+        loadResult(suppliedResult);
+        state.baseline = snapshotAnswers();
+        state.sourceResult = JSON.parse(JSON.stringify(suppliedResult));
+      } else {
+        state.baseline = null;
+        state.sourceResult = null;
+      }
       state.screen = "mos";
     } else {
       const result = parsed.value;
@@ -106,6 +119,7 @@
       state.screen = "mos";
     }
     render();
+    if (mode === "annotate" && parsed.value?.schema_version === S.RESULT_SCHEMA) S.toast("已恢复已有标注结果，可继续修改");
   }
 
   function showImportErrors(errors) { state.validation = errors; render(); S.toast("无法载入，请查看提示", "error"); }
@@ -182,6 +196,7 @@
     if (mosErrors.length) { state.screen = "mos"; state.currentCandidate = mosErrors[0].candidateIndex; state.currentGroup = activeGroups().findIndex((item) => item.dimensions.includes(mosErrors[0].dimensionKey)); state.validation = mosErrors; render(); jumpToError(mosErrors[0]); return; }
     state.rankingSubmitted = true;
     state.conflicts = computeConflicts();
+    scheduleDraftSave();
     render();
     if (state.conflicts.length) S.toast(`发现 ${state.conflicts.length} 处 MOS 与 Ranking 冲突`, "error");
     else S.toast("一致性检查通过，可以导出结果");
@@ -208,12 +223,12 @@
     });
     const rankings = {};
     activeRankingDimensions().forEach((dimension) => { rankings[dimension.key] = { final: state.rankings[dimension.key] }; });
-    let revision = Number(state.sourceResult?.revision || 0) || 0;
+    let revision = state.sourceResult ? Number(state.sourceResult.revision || 1) || 1 : 0;
     const audit = Array.isArray(state.sourceResult?.audit) ? JSON.parse(JSON.stringify(state.sourceResult.audit)) : [];
-    if (mode === "review") {
-      const changes = [];
+    let changes = [];
+    if (state.sourceResult) {
       collectChanges(state.baseline, snapshotAnswers(), "", changes);
-      if (changes.length) { revision += 1; audit.push({ revision, actor_role: "quality_reviewer", at: now, changes }); }
+      if (changes.length) { revision += 1; audit.push({ revision, actor_role: mode === "review" ? "quality_reviewer" : "annotator", at: now, changes }); }
       if (!revision) revision = 1;
     } else revision = 1;
     const compacted = S.compactObject({
@@ -225,7 +240,7 @@
       status: "complete",
       started_at: state.startedAt,
       completed_at: state.sourceResult?.completed_at || now,
-      updated_at: now,
+      updated_at: state.sourceResult && !changes.length ? state.sourceResult.updated_at || now : now,
       revision,
       audit
     });
@@ -238,17 +253,135 @@
     if (state.conflicts.length) return;
     state.result = buildResult();
     state.screen = "export";
+    saveLocalDraft(true);
     render();
+  }
+
+  function historyKey(task) {
+    return `${HISTORY_PREFIX}${encodeURIComponent(task?.fingerprint || task?.case?.case_id || "unknown")}`;
+  }
+
+  function readStoredDraft(key) {
+    try { return JSON.parse(localStorage.getItem(key) || "null"); }
+    catch (error) { return null; }
+  }
+
+  function pruneLocalHistory() {
+    try {
+      const entries = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!key?.startsWith(HISTORY_PREFIX)) continue;
+        const draft = readStoredDraft(key);
+        entries.push({ key, updatedAt: draft?.updated_at || "" });
+      }
+      entries.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(HISTORY_LIMIT).forEach((entry) => localStorage.removeItem(entry.key));
+    } catch (error) { /* local history is best-effort only */ }
+  }
+
+  function saveLocalDraft(exported) {
+    if (mode !== "annotate" || !state.task) return;
+    const payload = {
+      version: 1,
+      task: state.task,
+      mos: state.mos,
+      rankings: state.rankings,
+      ranking_note: state.rankingNote,
+      ranking_submitted: state.rankingSubmitted,
+      current_candidate: state.currentCandidate,
+      current_group: state.currentGroup,
+      current_ranking: state.currentRanking,
+      screen: state.screen === "ranking" ? "ranking" : "mos",
+      started_at: state.startedAt,
+      source_result: state.sourceResult,
+      baseline: state.baseline,
+      result_exported: Boolean(exported),
+      updated_at: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem(historyKey(state.task), JSON.stringify(payload));
+      pruneLocalHistory();
+    } catch (error) { /* evaluation must continue when localStorage is unavailable */ }
+  }
+
+  function scheduleDraftSave() {
+    if (mode !== "annotate" || !state.task) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => saveLocalDraft(false), 180);
+  }
+
+  function dimensionsForTask(task) {
+    const excluded = task?.case_type === "non_vocal" ? new Set(R.nonVocalExcludedDimensions) : new Set();
+    return R.dimensions.filter((dimension) => !excluded.has(dimension.key));
+  }
+
+  function historyProgress(draft) {
+    const task = draft.task;
+    const dimensions = dimensionsForTask(task);
+    const mosDone = (task.candidates || []).filter((candidate) => dimensions.every((dimension) => draft.mos?.[candidate.blind_id]?.scores?.[dimension.key] != null)).length;
+    const rankingTotal = R.rankingDimensions.filter((dimension) => !(dimension.vocalOnly && task.case_type === "non_vocal")).length;
+    const rankingDone = draft.ranking_submitted ? rankingTotal : 0;
+    return { done: mosDone + rankingDone, total: (task.candidates || []).length + rankingTotal };
+  }
+
+  function listLocalHistory() {
+    if (mode !== "annotate") return [];
+    const entries = [];
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!key?.startsWith(HISTORY_PREFIX)) continue;
+        const draft = readStoredDraft(key);
+        if (!draft?.task || validateTask(draft.task).length) continue;
+        entries.push({ key, draft, progress: historyProgress(draft) });
+      }
+    } catch (error) { return []; }
+    return entries.sort((a, b) => String(b.draft.updated_at || "").localeCompare(String(a.draft.updated_at || ""))).slice(0, HISTORY_LIMIT);
+  }
+
+  function restoreLocalDraft(key) {
+    const draft = readStoredDraft(key);
+    if (!draft?.task || validateTask(draft.task).length) return S.toast("这条本机记录已损坏，无法恢复", "error");
+    initializeTask(draft.task);
+    state.mos = JSON.parse(JSON.stringify(draft.mos || state.mos));
+    state.rankings = JSON.parse(JSON.stringify(draft.rankings || state.rankings));
+    state.rankingNote = draft.ranking_note || "";
+    state.rankingSubmitted = Boolean(draft.ranking_submitted);
+    state.currentCandidate = Math.min(3, Math.max(0, Number(draft.current_candidate) || 0));
+    state.currentGroup = Math.max(0, Number(draft.current_group) || 0);
+    state.currentRanking = Math.max(0, Number(draft.current_ranking) || 0);
+    state.startedAt = draft.started_at || new Date().toISOString();
+    state.sourceResult = draft.source_result || null;
+    state.baseline = draft.baseline || (state.sourceResult ? snapshotAnswers() : null);
+    state.screen = draft.screen === "ranking" ? "ranking" : "mos";
+    state.restoredDraft = true;
+    state.conflicts = computeConflicts();
+    render();
+    S.toast("已恢复本机历史记录");
+  }
+
+  function renderLocalHistory() {
+    const entries = listLocalHistory();
+    if (!entries.length) return "";
+    return `<section class="local-history card"><div class="card-header"><div><h2>本机 Case 历史</h2><div class="field-help">仅在当前浏览器保存；手动粘贴空白工单仍会从空白开始。</div></div><span class="badge">${entries.length} 条</span></div><div class="history-list">${entries.map(({ key, draft, progress: value }) => `<div class="history-row"><div><strong>${S.escapeHtml(draft.task.case.case_id)}</strong><span>${S.escapeHtml(draft.task.batch_id || "未填写批次")}</span></div><div><strong>${value.done}/${value.total}</strong><span>${draft.result_exported ? "已导出" : value.done === value.total ? "已完成，未确认导出" : "进行中"}</span></div><time>${S.escapeHtml(new Date(draft.updated_at).toLocaleString("zh-CN", { hour12: false }))}</time><div class="history-actions"><button class="button small soft" data-action="restore-history" data-history-key="${S.escapeHtml(key)}">恢复记录</button><button class="button small" data-action="delete-history" data-history-key="${S.escapeHtml(key)}">删除</button></div></div>`).join("")}</div><p class="history-footnote">历史记录只包含脱敏工单和评分；清理浏览器数据后无法找回，正式结果仍需复制或下载。</p></section>`;
+  }
+
+  function loadDemo(kind) {
+    const demo = window.SB_NOV_DEMO;
+    if (!demo) return;
+    const loader = kind === "result" ? demo.completedResult : demo.workOrder;
+    loader().then((value) => { state.paste = JSON.stringify(value); state.validation = []; render(); S.toast(kind === "result" ? "已加载已有结果测试 Case" : "已加载空白测试 Case"); });
   }
 
   function renderImport() {
     const isReview = mode === "review";
-    root.innerHTML = `<header class="page-heading"><div><span class="eyebrow">${isReview ? "QUALITY REVIEW" : "ANNOTATION"}</span><h1>${isReview ? "质检验收" : "单 Case 评测"}</h1><p>${isReview ? "粘贴一格结果 JSON，恢复完整 Case 并进行复核。" : "从工单中复制 work_order_json 单元格，粘贴后开始评测。"}</p></div><span class="badge">4 模型 · MOS + Ranking</span></header>
-      <section class="card"><div class="card-header"><div><h2>01 ${isReview ? "粘贴结果 JSON" : "粘贴工单单元格"}</h2><div class="field-help">不需要复制整行，也不会读取右侧业务列。</div></div></div><div class="card-body">
+    root.innerHTML = `<header class="page-heading"><div><span class="eyebrow">${isReview ? "QUALITY REVIEW" : "ANNOTATION"}</span><h1>${isReview ? "质检验收" : "单 Case 评测"}</h1><p>${isReview ? "粘贴一格结果 JSON，恢复完整 Case 并进行复核。" : "粘贴未标注工单或已有结果 JSON，开始新评测或继续修改。"}</p></div><span class="badge">4 模型 · MOS + Ranking</span></header>
+      <section class="card"><div class="card-header"><div><h2>01 ${isReview ? "粘贴结果 JSON" : "粘贴工单或结果 JSON"}</h2><div class="field-help">不需要复制整行，也不会读取右侧业务列。</div></div></div><div class="card-body">
         <textarea id="import-input" class="code-input" placeholder="在此粘贴一整个 JSON 单元格">${S.escapeHtml(state.paste)}</textarea>
         ${state.validation.length ? `<div class="alert error"><strong>无法载入</strong><ul>${state.validation.map((error) => `<li>${S.escapeHtml(error)}</li>`).join("")}</ul></div>` : ""}
+        ${isReview ? "" : `<div class="toolbar"><button class="button small" data-action="demo-blank">加载空白测试 Case</button><button class="button small" data-action="demo-result">加载已有结果测试 Case</button></div>`}
         <div class="toolbar split"><span class="field-help">所有数据只在当前浏览器中处理。</span><button class="button primary" data-action="import">解析并进入${isReview ? "质检" : "评测"}</button></div>
-      </div></section>`;
+      </div></section>${isReview ? "" : renderLocalHistory()}`;
   }
 
   function progress() {
@@ -349,6 +482,7 @@
     const dimension = activeRankingDimensions()[state.currentRanking];
     state.rankings[dimension.key] = Array.from(list.querySelectorAll("[data-rank-id]")).map((row) => row.dataset.rankId);
     refreshRankingUi();
+    scheduleDraftSave();
   }
 
   function clearRankInsertion() {
@@ -364,11 +498,12 @@
   }
 
   function renderTask() {
-    root.innerHTML = `${renderProgress()}<div class="task-layout">${renderRail()}<main>${state.screen === "mos" ? renderMos() : renderRanking()}</main></div>`;
+    const historyBanner = mode === "annotate" && (state.restoredDraft || state.sourceResult) ? `<div class="resume-banner"><div><strong>${state.restoredDraft ? "已恢复本机历史记录" : "正在修改已有标注结果"}</strong><span>${state.sourceResult ? `原结果 Revision ${Number(state.sourceResult.revision || 1)}` : "继续上次尚未完成的评分"}</span></div><span class="badge">修改后重新导出</span></div>` : "";
+    root.innerHTML = `${renderProgress()}${historyBanner}<div class="task-layout">${renderRail()}<main>${state.screen === "mos" ? renderMos() : renderRanking()}</main></div>`;
   }
   function render() {
     if (state.screen === "import") renderImport();
-    else if (state.screen === "export") renderExport();
+    else if (state.screen === "export") root.innerHTML = renderExport();
     else renderTask();
   }
 
@@ -380,8 +515,8 @@
 
   root.addEventListener("input", (event) => {
     if (event.target.id === "import-input") state.paste = event.target.value;
-    if (event.target.matches("[data-note]")) { const answer = answerFor(state.currentCandidate); const value = event.target.value; if (value) answer.notes[event.target.dataset.note] = value; else delete answer.notes[event.target.dataset.note]; event.target.style.height = "auto"; event.target.style.height = `${Math.min(120, Math.max(38, event.target.scrollHeight))}px`; }
-    if (event.target.id === "ranking-note") state.rankingNote = event.target.value;
+    if (event.target.matches("[data-note]")) { const answer = answerFor(state.currentCandidate); const value = event.target.value; if (value) answer.notes[event.target.dataset.note] = value; else delete answer.notes[event.target.dataset.note]; event.target.style.height = "auto"; event.target.style.height = `${Math.min(120, Math.max(38, event.target.scrollHeight))}px`; scheduleDraftSave(); }
+    if (event.target.id === "ranking-note") { state.rankingNote = event.target.value; scheduleDraftSave(); }
   });
   root.addEventListener("change", (event) => {
     if (event.target.matches("[data-issue]")) {
@@ -389,6 +524,7 @@
       const selected = new Set(answer.issues[key] || []); event.target.checked ? selected.add(event.target.value) : selected.delete(event.target.value);
       if (selected.size) answer.issues[key] = Array.from(selected); else delete answer.issues[key];
       event.target.closest(".option-pill")?.classList.toggle("selected", event.target.checked);
+      scheduleDraftSave();
     }
   });
   root.addEventListener("play", (event) => {
@@ -450,16 +586,20 @@
       answer.scores[key] = value === "NA" ? "NA" : Number(value);
       if (value === "NA") delete answer.issues[key];
       state.validation = state.validation.filter((error) => !(error.candidateIndex === state.currentCandidate && error.dimensionKey === key));
-      updateDimensionRow(key); return;
+      updateDimensionRow(key); scheduleDraftSave(); return;
     }
     const candidate = event.target.closest("[data-candidate]");
-    if (candidate) { state.screen = "mos"; state.currentCandidate = Number(candidate.dataset.candidate); state.currentGroup = 0; state.validation = []; render(); return; }
+    if (candidate) { state.screen = "mos"; state.currentCandidate = Number(candidate.dataset.candidate); state.currentGroup = 0; state.validation = []; scheduleDraftSave(); render(); return; }
     const group = event.target.closest("[data-group]");
-    if (group) { state.currentGroup = Number(group.dataset.group); state.validation = []; render(); return; }
+    if (group) { state.currentGroup = Number(group.dataset.group); state.validation = []; scheduleDraftSave(); render(); return; }
     const ranking = event.target.closest("[data-ranking]");
-    if (ranking) { state.screen = "ranking"; state.currentRanking = Number(ranking.dataset.ranking); state.conflicts = computeConflicts(); render(); return; }
+    if (ranking) { state.screen = "ranking"; state.currentRanking = Number(ranking.dataset.ranking); state.conflicts = computeConflicts(); scheduleDraftSave(); render(); return; }
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "import") importValue();
+    if (action === "demo-blank") loadDemo("blank");
+    if (action === "demo-result") loadDemo("result");
+    if (action === "restore-history") restoreLocalDraft(event.target.closest("[data-history-key]").dataset.historyKey);
+    if (action === "delete-history") { localStorage.removeItem(event.target.closest("[data-history-key]").dataset.historyKey); render(); S.toast("本机记录已删除"); }
     if (action === "previous-group" && state.currentGroup > 0) { state.currentGroup -= 1; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
     if (action === "next-group") {
       const errors = validateGroup(state.currentCandidate, state.currentGroup); state.validation = errors;
@@ -475,8 +615,11 @@
     if (action === "copy-result") navigator.clipboard.writeText(JSON.stringify(state.result)).then(() => S.toast("已复制结果 JSON"), () => S.toast("复制失败，请手动选择", "error"));
     if (action === "download-result") S.download(`${state.task.case.case_id}-${S.dateStamp()}.json`, JSON.stringify(state.result, null, 2), "application/json");
     if (action === "back-ranking") { state.screen = "ranking"; render(); }
-    if (action === "new-case") { Object.assign(state, { screen: "import", paste: "", task: null, mos: {}, rankings: {}, rankingInitial: {}, rankingNote: "", currentGroup: 0, baseline: null, sourceResult: null, result: null, validation: [] }); render(); }
+    if (action === "new-case") { Object.assign(state, { screen: "import", paste: "", task: null, mos: {}, rankings: {}, rankingInitial: {}, rankingNote: "", currentGroup: 0, baseline: null, sourceResult: null, result: null, validation: [], restoredDraft: false }); render(); }
   });
 
+  window.addEventListener("beforeunload", () => { if (state.task && state.screen !== "import") saveLocalDraft(state.screen === "export"); });
+
+  if (window.__SB_NOV_TEST__) window.SB_NOV_EVALUATION_TEST = { state, goExport, listLocalHistory, restoreLocalDraft, saveLocalDraft };
   render();
 })();
