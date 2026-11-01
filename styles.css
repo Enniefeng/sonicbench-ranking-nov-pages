@@ -185,6 +185,10 @@ audio { width: 100%; height: 42px; }
 .group-head h3 { margin: 0; font-size: 18px; }
 .dimension-row { padding: 13px 18px; border-bottom: 1px solid var(--line); scroll-margin-top: 205px; }
 .dimension-row:last-child { border-bottom: 0; }
+.dimension-row.overall-dimension { background: linear-gradient(90deg, #e7f4ff 0%, #f2f9ff 62%, #edf7ff 100%); border-top: 1px solid #b9d9f1; border-bottom-color: #b9d9f1; }
+.overall-dimension .dimension-name { color: #155f99; font-size: 16px; font-weight: 820; }
+.overall-dimension .source-field-label { color: #2f6f9e; }
+.overall-dimension .score-buttons { border-color: #c2dff3; background: rgba(255,255,255,.72); }
 .dimension-top { display: grid; grid-template-columns: minmax(200px, .8fr) minmax(500px, 1.55fr); gap: 22px; align-items: center; }
 .dimension-name { font-weight: 750; }
 .source-field-label { margin: 0 0 5px 4px; color: var(--muted); font-size: 11px; font-weight: 720; }

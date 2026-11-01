@@ -31,8 +31,15 @@
   };
 
   function candidateLabel(index) { return `候选 ${String(index + 1).padStart(2, "0")}`; }
-  function displayDimensionLabel(dimension) { return dimension?.labelByCase?.[state.task?.case_type] || dimension?.label || ""; }
-  function displayGroupLabel(group) { return group?.labelByCase?.[state.task?.case_type] || group?.label || ""; }
+  function isOverallDimension(dimension) { return dimension?.key === "overall" || dimension?.key?.endsWith("_overall"); }
+  function displayDimensionLabel(dimension) {
+    const label = dimension?.labelByCase?.[state.task?.case_type] || dimension?.label || "";
+    return isOverallDimension(dimension) ? label.replace(/^\d+\s*[.．、]\s*/, "") : label;
+  }
+  function displayGroupLabel(group) {
+    const label = group?.labelByCase?.[state.task?.case_type] || group?.label || "";
+    return label.replace(/^\d+\s*[.．、]\s*/, "").replace(/\s*[（(].*?[）)]\s*$/, "").trim();
+  }
   function displayDimensionOptions(dimension) { return dimension?.optionsByCase?.[state.task?.case_type] || dimension?.options || []; }
   function activeDimensions() {
     const excluded = state.task?.case_type === "non_vocal" ? new Set(R.nonVocalExcludedDimensions) : new Set();
@@ -274,7 +281,7 @@
     const showIssues = score === "NA" || (isNumericScore(score) && ((dimension.issueRule === "low3" && Number(score) <= 3) || (dimension.issueRule === "below5" && Number(score) < 5)));
     const showNote = score != null && (score === "NA" || dimension.noteRule === "always" || dimension.noteRule === "optional" || (dimension.noteRule === "low3" && Number(score) <= 3) || (dimension.noteRule === "below5" && Number(score) < 5));
     const values = [1, 2, 3, 4, 5].concat(dimension.allowNA ? ["NA"] : []);
-    return `<div class="dimension-row ${errors.length && state.validation.some((error) => error.candidateIndex === state.currentCandidate && error.dimensionKey === dimension.key) ? "field-error" : ""}" data-dimension-row="${dimension.key}"><div class="dimension-top"><div><div class="dimension-name">${S.escapeHtml(displayDimensionLabel(dimension))}</div>${errors.length && state.validation.some((error) => error.dimensionKey === dimension.key) ? `<div class="field-help required">${S.escapeHtml(errors.join("；"))}</div>` : ""}</div><div><div class="source-field-label">${S.escapeHtml(dimension.scoreLabel)}</div><div class="score-buttons ${dimension.allowNA ? "" : "no-na"}">${values.map((value) => `<button class="score-button ${value === "NA" ? "na" : ""} ${String(score) === String(value) ? "selected" : ""}" data-score="${dimension.key}" data-value="${value}">${value}</button>`).join("")}</div></div></div>${showIssues && dimensionOptions.length ? `<div class="dimension-detail"><div class="detail-title"><span>${S.escapeHtml(dimension.issueLabel)}</span></div><div class="option-list">${dimensionOptions.map((option) => `<label class="option-pill ${issues.includes(option.id) ? "selected" : ""}"><input type="checkbox" data-issue="${dimension.key}" value="${option.id}" ${issues.includes(option.id) ? "checked" : ""}><span>${S.escapeHtml(option.label)}</span></label>`).join("")}</div></div>` : ""}${showNote ? `<div class="note-field"><label>${S.escapeHtml(dimension.noteLabel)}</label><textarea rows="1" class="note-input" data-note="${dimension.key}" placeholder="${score === "NA" ? "请填写 N/A 原因" : "填写内容"}">${S.escapeHtml(note)}</textarea></div>` : ""}</div>`;
+    return `<div class="dimension-row ${isOverallDimension(dimension) ? "overall-dimension" : ""} ${errors.length && state.validation.some((error) => error.candidateIndex === state.currentCandidate && error.dimensionKey === dimension.key) ? "field-error" : ""}" data-dimension-row="${dimension.key}"><div class="dimension-top"><div><div class="dimension-name">${S.escapeHtml(displayDimensionLabel(dimension))}</div>${errors.length && state.validation.some((error) => error.dimensionKey === dimension.key) ? `<div class="field-help required">${S.escapeHtml(errors.join("；"))}</div>` : ""}</div><div><div class="source-field-label">${S.escapeHtml(dimension.scoreLabel)}</div><div class="score-buttons ${dimension.allowNA ? "" : "no-na"}">${values.map((value) => `<button class="score-button ${value === "NA" ? "na" : ""} ${String(score) === String(value) ? "selected" : ""}" data-score="${dimension.key}" data-value="${value}">${value}</button>`).join("")}</div></div></div>${showIssues && dimensionOptions.length ? `<div class="dimension-detail"><div class="detail-title"><span>${S.escapeHtml(dimension.issueLabel)}</span></div><div class="option-list">${dimensionOptions.map((option) => `<label class="option-pill ${issues.includes(option.id) ? "selected" : ""}"><input type="checkbox" data-issue="${dimension.key}" value="${option.id}" ${issues.includes(option.id) ? "checked" : ""}><span>${S.escapeHtml(option.label)}</span></label>`).join("")}</div></div>` : ""}${showNote ? `<div class="note-field"><label>${S.escapeHtml(dimension.noteLabel)}</label><textarea rows="1" class="note-input" data-note="${dimension.key}" placeholder="${score === "NA" ? "请填写 N/A 原因" : "填写内容"}">${S.escapeHtml(note)}</textarea></div>` : ""}</div>`;
   }
 
   function renderMos() {
