@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>SonicBench · 11 月评测工具</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="portal-locked">
+  <section id="portal-gate" class="portal-gate" aria-labelledby="portal-gate-title">
+    <form id="portal-gate-form" class="portal-gate-card" autocomplete="off">
+      <span class="brand-mark portal-mark">SB</span>
+      <span class="eyebrow">RESTRICTED PORTAL</span>
+      <h1 id="portal-gate-title">访问评测入口</h1>
+      <p>请输入本期总入口访问码。验证仅保存在当前浏览器会话中。</p>
+      <label class="field-label" for="portal-access-code">访问码</label>
+      <input id="portal-access-code" type="password" inputmode="text" autocomplete="current-password" required>
+      <p id="portal-gate-error" class="portal-gate-error" role="alert" aria-live="polite"></p>
+      <button class="button primary portal-submit" type="submit">验证并进入</button>
+    </form>
+  </section>
+  <main id="portal-content" class="landing shell" hidden>
+    <header class="hero compact-hero">
+      <span class="eyebrow">SONICBENCH · NOVEMBER</span>
+      <h1>音乐生成评测工具</h1>
+      <p>固定 4 模型，支持单单元格工单、MOS 分层评分、强制 Ranking 与一致性检查。</p>
+    </header>
+    <section class="entry-grid" aria-label="工具入口">
+      <a class="entry-card" href="admin.html">
+        <span class="entry-index">01</span>
+        <h2>管理员工单生成</h2>
+        <p>导入原始样本，生成脱敏工单与独立 Mapping。</p>
+        <span class="entry-link">进入生成器 →</span>
+      </a>
+      <a class="entry-card" href="annotate.html">
+        <span class="entry-index">02</span>
+        <h2>标注员评测</h2>
+        <p>粘贴单个工单单元格，完成 MOS 与 Ranking。</p>
+        <span class="entry-link">进入评测 →</span>
+      </a>
+      <a class="entry-card" href="review.html">
+        <span class="entry-index">03</span>
+        <h2>质检验收</h2>
+        <p>粘贴结果 JSON，恢复答案并复核、修订与导出。</p>
+        <span class="entry-link">进入质检 →</span>
+      </a>
+    </section>
+  </main>
+  <script src="portal-gate.js"></script>
+</body>
+</html>
