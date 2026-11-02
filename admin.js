@@ -4,10 +4,11 @@
   const root = document.getElementById("admin-app");
   if (!root || !S) return;
 
-  const HEADERS = ["样本编号", "language", "info", "歌词", "模型1 URL", "模型2 URL", "模型3 URL", "模型4 URL"];
+  const HEADERS = ["样本编号", "language", "音频类型", "info", "歌词", "模型1 URL", "模型2 URL", "模型3 URL", "模型4 URL"];
   const ALIASES = {
     case_id: ["样本编号", "序号", "case_id", "case id"],
     language: ["language", "语言", "语种"],
+    case_type: ["音频类型", "歌曲类型", "vocal类型", "vocal type", "audio type", "case_type", "case type", "type"],
     info: ["info", "tag", "caption", "prompt", "描述"],
     lyrics: ["歌词", "lyrics", "lyric"],
     model_1_url: ["模型1url", "模型1 url", "model1url", "model_1_url", "模型1"],
@@ -18,6 +19,12 @@
   const state = { tab: "paste", text: "", rows: [], records: [], errors: [], generated: null, fileName: "" };
 
   function normalizeHeader(value) { return String(value || "").trim().toLowerCase().replace(/[\s_\-（）()]/g, ""); }
+  function normalizeCaseType(value) {
+    const normalized = String(value || "").trim().toLowerCase().replace(/[\s_\-]/g, "");
+    if (normalized === "vocal") return "vocal";
+    if (normalized === "nonvocal") return "non_vocal";
+    return "";
+  }
   function findColumn(headers, key) {
     const normalized = headers.map(normalizeHeader);
     return normalized.findIndex((header) => ALIASES[key].some((alias) => header === normalizeHeader(alias)));
@@ -34,7 +41,7 @@
   }
 
   function inferredUrlColumns(headers, dataRows) {
-    const excluded = new Set([findColumn(headers, "case_id"), findColumn(headers, "language"), findColumn(headers, "info"), findColumn(headers, "lyrics")]);
+    const excluded = new Set([findColumn(headers, "case_id"), findColumn(headers, "language"), findColumn(headers, "case_type"), findColumn(headers, "info"), findColumn(headers, "lyrics")]);
     return headers.map((_, index) => index).filter((index) => {
       if (excluded.has(index)) return false;
       const values = dataRows.slice(0, 20).map((row) => String(row[index] || "").trim()).filter(Boolean);
@@ -57,8 +64,8 @@
     if (headerRowIndex < 0) return { records: [], errors: ["前 20 行中未找到完整表头；需要包含样本编号和模型1–4 URL"] };
     const headers = rows[headerRowIndex];
     const indexes = {};
-    ["case_id", "language", "info", "lyrics"].forEach((key) => { indexes[key] = findColumn(headers, key); });
-    [["case_id", "样本编号/序号"], ["info", "info/prompt"], ["lyrics", "歌词/lyrics"]].forEach(([key, label]) => { if (indexes[key] < 0) errors.push(`缺少列：${label}`); });
+    ["case_id", "language", "case_type", "info", "lyrics"].forEach((key) => { indexes[key] = findColumn(headers, key); });
+    [["case_id", "样本编号/序号"], ["case_type", "音频类型（Vocal / Non Vocal）"], ["info", "info/prompt"], ["lyrics", "歌词/lyrics"]].forEach(([key, label]) => { if (indexes[key] < 0) errors.push(`缺少列：${label}`); });
     const modelUrlIndexes = urlColumns(headers, rows.slice(headerRowIndex + 1));
     if (modelUrlIndexes.length !== 4) errors.push("未找到 4 个模型 URL 列；支持模型1–4 URL、seed_* 或可识别的连续 URL 列");
     if (errors.length) return { records: [], errors };
@@ -68,6 +75,8 @@
       const record = {
         caseId: String(row[indexes.case_id] || "").trim(),
         language: indexes.language >= 0 ? String(row[indexes.language] || "") : "",
+        caseType: normalizeCaseType(row[indexes.case_type]),
+        caseTypeSource: String(row[indexes.case_type] || ""),
         info: String(row[indexes.info] || ""),
         lyrics: String(row[indexes.lyrics] || ""),
         urls: modelUrlIndexes.map((index) => S.normalizeUrl(row[index])),
@@ -77,6 +86,7 @@
       else if (seen.has(record.caseId)) errors.push(`第 ${line} 行：样本编号重复（${record.caseId}）`);
       else seen.add(record.caseId);
       if (!record.info.trim()) errors.push(`第 ${line} 行：info 为空`);
+      if (!record.caseType) errors.push(`第 ${line} 行：音频类型必须填写 Vocal 或 Non Vocal（当前为“${record.caseTypeSource || "空"}”）`);
       record.urls.forEach((url, index) => { if (!S.isUrl(url)) errors.push(`第 ${line} 行：模型 ${index + 1} URL 无效`); });
       if (new Set(record.urls).size !== 4) errors.push(`第 ${line} 行：四个模型 URL 必须互不相同`);
       return record;
@@ -135,7 +145,7 @@
         task_id: taskId,
         case: { case_id: record.caseId, language: record.language, info: record.info, lyrics: record.lyrics },
         candidates: shuffled.map(({ blind_id, url }) => ({ blind_id, url })),
-        case_type: record.lyrics.trim() ? "vocal" : "non_vocal",
+        case_type: record.caseType,
         rubric_version: window.SB_NOV_RUBRIC.version
       };
       workOrder.fingerprint = await S.fingerprint(workOrder);
@@ -195,7 +205,7 @@
   }
 
   function templateCsv() {
-    const example = ["base_001", "Chinese", "温暖流行，女声，中速", "[Verse]\n示例歌词", "https://example.com/model1.wav", "https://example.com/model2.wav", "https://example.com/model3.wav", "https://example.com/model4.wav"];
+    const example = ["base_001", "Chinese", "Vocal", "温暖流行，女声，中速", "[Verse]\n示例歌词", "https://example.com/model1.wav", "https://example.com/model2.wav", "https://example.com/model3.wav", "https://example.com/model4.wav"];
     S.download("SonicBench-11月-管理员导入模板.csv", S.toCsv([HEADERS, example]), "text/csv;charset=utf-8");
   }
 
@@ -206,9 +216,9 @@
   function renderPreview() {
     if (state.errors.length) return `<div class="alert error"><strong>导入内容需要修正</strong><ul>${state.errors.slice(0, 12).map((error) => `<li>${S.escapeHtml(error)}</li>`).join("")}</ul>${state.errors.length > 12 ? `<p>另有 ${state.errors.length - 12} 项未展示</p>` : ""}</div>`;
     if (!state.records.length) return "";
-    const vocalCount = state.records.filter((record) => record.lyrics.trim()).length;
+    const vocalCount = state.records.filter((record) => record.caseType === "vocal").length;
     return `<div class="alert success"><strong>格式检查通过</strong>已识别 ${state.records.length} 条 Case，其中 Vocal ${vocalCount} 条、Non Vocal ${state.records.length - vocalCount} 条。</div>
-      <div class="table-wrap"><table><thead><tr><th>Case ID</th><th>Language</th><th>类型</th><th>Info</th><th>模型 URL</th></tr></thead><tbody>${state.records.slice(0, 12).map((record) => `<tr><td>${S.escapeHtml(record.caseId)}</td><td>${S.escapeHtml(record.language || "—")}</td><td><span class="badge ${record.lyrics.trim() ? "vocal" : "non-vocal"}">${record.lyrics.trim() ? "Vocal" : "Non Vocal"}</span></td><td class="truncate">${S.escapeHtml(record.info)}</td><td>4 条</td></tr>`).join("")}</tbody></table></div>`;
+      <div class="table-wrap"><table><thead><tr><th>Case ID</th><th>Language</th><th>类型</th><th>Info</th><th>模型 URL</th></tr></thead><tbody>${state.records.slice(0, 12).map((record) => `<tr><td>${S.escapeHtml(record.caseId)}</td><td>${S.escapeHtml(record.language || "—")}</td><td><span class="badge ${record.caseType === "vocal" ? "vocal" : "non-vocal"}">${record.caseType === "vocal" ? "Vocal" : "Non Vocal"}</span></td><td class="truncate">${S.escapeHtml(record.info)}</td><td>4 条</td></tr>`).join("")}</tbody></table></div>`;
   }
 
   function renderGenerated() {
@@ -227,12 +237,12 @@
   function render() {
     root.innerHTML = `<header class="page-heading"><div><span class="eyebrow">ADMIN WORK ORDER</span><h1>管理员工单生成</h1><p>导入原始样本，按 Case 独立随机脱敏，生成单单元格工单与管理员 Mapping。</p></div><button class="button" data-action="template">下载导入模板</button></header>
       <section class="card">
-        <div class="card-header"><div><h2>01 导入原始样本</h2><div class="field-help">必需列：样本编号、language、info、歌词、模型1–4 URL；允许存在额外业务列。</div></div><span class="badge">固定 4 模型</span></div>
+        <div class="card-header"><div><h2>01 导入原始样本</h2><div class="field-help">必需列：样本编号、音频类型、info、歌词、模型1–4 URL；language 可为空，允许存在额外业务列。</div></div><span class="badge">固定 4 模型</span></div>
         <div class="card-body">
           <div class="input-tabs"><button class="input-tab ${state.tab === "paste" ? "active" : ""}" data-tab="paste">粘贴表格</button><button class="input-tab ${state.tab === "file" ? "active" : ""}" data-tab="file">上传 Excel / CSV</button></div>
-          <div style="margin-top:16px">${state.tab === "paste" ? `<label class="field-label" for="raw-input">从表格复制包含表头的数据区域</label><textarea id="raw-input" class="code-input" placeholder="样本编号&#9;language&#9;info&#9;歌词&#9;模型1 URL&#9;模型2 URL&#9;模型3 URL&#9;模型4 URL">${S.escapeHtml(state.text)}</textarea><div class="toolbar"><button class="button primary" data-action="inspect">解析并检查</button></div>` : `<div class="file-drop"><div><label class="field-label" for="file-input">选择 .xlsx、.xls 或 .csv 文件</label><input id="file-input" type="file" accept=".xlsx,.xls,.csv,text/csv"><p class="field-help">${S.escapeHtml(state.fileName || "读取第一个工作表；额外列不会进入脱敏工单。")}</p></div></div>`}</div>
+          <div style="margin-top:16px">${state.tab === "paste" ? `<label class="field-label" for="raw-input">从表格复制包含表头的数据区域</label><textarea id="raw-input" class="code-input" placeholder="样本编号&#9;language&#9;音频类型&#9;info&#9;歌词&#9;模型1 URL&#9;模型2 URL&#9;模型3 URL&#9;模型4 URL">${S.escapeHtml(state.text)}</textarea><div class="toolbar"><button class="button primary" data-action="inspect">解析并检查</button></div>` : `<div class="file-drop"><div><label class="field-label" for="file-input">选择 .xlsx、.xls 或 .csv 文件</label><input id="file-input" type="file" accept=".xlsx,.xls,.csv,text/csv"><p class="field-help">${S.escapeHtml(state.fileName || "读取第一个工作表；额外列不会进入脱敏工单。")}</p></div></div>`}</div>
           ${renderPreview()}
-          ${state.records.length && !state.errors.length ? `<div class="toolbar split"><span class="field-help">歌词为空自动判定为 Non Vocal；存在任意歌词文本则判定为 Vocal。</span><button class="button primary" data-action="generate">生成脱敏工单</button></div>` : ""}
+          ${state.records.length && !state.errors.length ? `<div class="toolbar split"><span class="field-help">Vocal / Non Vocal 只读取“音频类型”列；歌词内容不会参与类型判断。</span><button class="button primary" data-action="generate">生成脱敏工单</button></div>` : ""}
         </div>
       </section>${renderGenerated()}`;
   }

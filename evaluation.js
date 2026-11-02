@@ -191,6 +191,22 @@
     return S.rankingConflicts(state.task, state.mos, state.rankings, activeRankingDimensions());
   }
 
+  function computeRankingTies() {
+    return activeRankingDimensions().flatMap((dimension) => {
+      const groups = new Map();
+      (state.rankings[dimension.key] || []).forEach((blindId) => {
+        const score = state.mos?.[blindId]?.scores?.[dimension.scoreKey];
+        if (!isNumericScore(score)) return;
+        const key = Number(score);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(blindId);
+      });
+      return Array.from(groups.entries()).filter(([, blindIds]) => blindIds.length > 1).map(([score, blindIds]) => ({ dimension, score, blindIds }));
+    });
+  }
+
+  function rankingReasonMissing() { return computeRankingTies().length > 0 && !state.rankingNote.trim(); }
+
   function submitRanking() {
     const mosErrors = validateAllMos();
     if (mosErrors.length) { state.screen = "mos"; state.currentCandidate = mosErrors[0].candidateIndex; state.currentGroup = activeGroups().findIndex((item) => item.dimensions.includes(mosErrors[0].dimensionKey)); state.validation = mosErrors; render(); jumpToError(mosErrors[0]); return; }
@@ -199,6 +215,7 @@
     scheduleDraftSave();
     render();
     if (state.conflicts.length) S.toast(`发现 ${state.conflicts.length} 处 MOS 与 Ranking 冲突`, "error");
+    else if (rankingReasonMissing()) S.toast("存在同分不同排名，请填写统一 Ranking 理由", "error");
     else S.toast("一致性检查通过，可以导出结果");
   }
 
@@ -250,7 +267,7 @@
 
   function goExport() {
     submitRanking();
-    if (state.conflicts.length) return;
+    if (state.conflicts.length || rankingReasonMissing()) return;
     state.result = buildResult();
     state.screen = "export";
     saveLocalDraft(true);
@@ -386,7 +403,7 @@
 
   function progress() {
     const mosDone = state.task.candidates.filter((_, index) => candidateComplete(index)).length;
-    const rankingDone = state.rankingSubmitted && !state.conflicts.length ? activeRankingDimensions().length : 0;
+    const rankingDone = state.rankingSubmitted && !state.conflicts.length && !rankingReasonMissing() ? activeRankingDimensions().length : 0;
     const total = state.task.candidates.length + activeRankingDimensions().length;
     return { done: mosDone + rankingDone, total, percent: Math.round((mosDone + rankingDone) / total * 100) };
   }
@@ -398,11 +415,11 @@
 
   function renderRail() {
     const groups = activeGroups();
-    return `<aside class="card task-rail"><div class="rail-heading"><span class="rail-step-number">1</span><div><strong>MOS 分层评分</strong><small>4 个匿名候选</small></div></div><div class="rail-tree">${state.task.candidates.map((candidate, index) => `<div class="rail-node"><button class="rail-item rail-candidate ${state.screen === "mos" && state.currentCandidate === index ? "active" : ""} ${candidateComplete(index) ? "done" : ""}" data-candidate="${index}"><span class="rail-dot">${String(index + 1).padStart(2, "0")}</span><span>${candidateLabel(index)}</span></button>${state.screen === "mos" && state.currentCandidate === index ? `<div class="rail-subtree">${groups.map((group, groupIndex) => `<button class="rail-subitem ${state.currentGroup === groupIndex ? "active" : ""} ${groupComplete(index, groupIndex) ? "done" : ""}" data-group="${groupIndex}">${S.escapeHtml(displayGroupLabel(group))}</button>`).join("")}</div>` : ""}</div>`).join("")}</div><div class="rail-divider"></div><div class="rail-heading"><span class="rail-step-number">2</span><div><strong>Ranking</strong><small>强制排序，不允许并列</small></div></div><div class="rail-tree">${activeRankingDimensions().map((dimension, index) => `<button class="rail-item rail-ranking ${state.screen === "ranking" && state.currentRanking === index ? "active" : ""} ${state.rankingSubmitted && !state.conflicts.some((conflict) => conflict.dimension.key === dimension.key) ? "done" : ""}" data-ranking="${index}"><span class="rail-dot">${index + 1}</span><span>${S.escapeHtml(dimension.label)}</span></button>`).join("")}</div></aside>`;
+    return `<aside class="card task-rail"><div class="rail-heading"><span class="rail-step-number">1</span><div><strong>MOS 分层评分</strong><small>4 个匿名候选</small></div></div><div class="rail-tree">${state.task.candidates.map((candidate, index) => `<div class="rail-node"><button class="rail-item rail-candidate ${state.screen === "mos" && state.currentCandidate === index ? "active" : ""} ${candidateComplete(index) ? "done" : ""}" data-candidate="${index}"><span class="rail-dot">${String(index + 1).padStart(2, "0")}</span><span>${candidateLabel(index)}</span></button>${state.screen === "mos" && state.currentCandidate === index ? `<div class="rail-subtree">${groups.map((group, groupIndex) => `<button class="rail-subitem ${state.currentGroup === groupIndex ? "active" : ""} ${groupComplete(index, groupIndex) ? "done" : ""}" data-group="${groupIndex}">${S.escapeHtml(displayGroupLabel(group))}</button>`).join("")}</div>` : ""}</div>`).join("")}</div><div class="rail-divider"></div><div class="rail-heading"><span class="rail-step-number">2</span><div><strong>Ranking</strong><small>先盲排，提交后检查</small></div></div><div class="rail-tree">${activeRankingDimensions().map((dimension, index) => `<button class="rail-item rail-ranking ${state.screen === "ranking" && state.currentRanking === index ? "active" : ""} ${state.rankingSubmitted && !state.conflicts.some((conflict) => conflict.dimension.key === dimension.key) && !rankingReasonMissing() ? "done" : ""}" data-ranking="${index}"><span class="rail-dot">${index + 1}</span><span>${S.escapeHtml(dimension.label)}</span></button>`).join("")}</div></aside>`;
   }
 
   function renderContext(candidate, groups) {
-    return `<div class="sticky-context"><div class="audio-row"><div><div class="candidate-label">${candidateLabel(state.currentCandidate)}</div><span class="field-help">匿名音频</span></div><audio controls preload="metadata" src="${S.escapeHtml(candidate.url)}"></audio></div><div class="context-grid"><div class="context-box"><strong>info · ${S.escapeHtml(state.task.case.language || "未填写 language")}</strong>${S.escapeHtml(state.task.case.info)}</div><div class="context-box"><strong>歌词</strong>${S.escapeHtml(state.task.case.lyrics || "该 Case 无歌词，已按 Non Vocal 处理")}</div></div><nav class="group-tabs" aria-label="评分模块">${groups.map((group, index) => `<button class="group-tab ${index === state.currentGroup ? "active" : ""} ${groupComplete(state.currentCandidate, index) ? "done" : ""}" data-group="${index}"><span>${S.escapeHtml(displayGroupLabel(group))}</span></button>`).join("")}</nav></div>`;
+    return `<div class="sticky-context"><div class="audio-row"><div><div class="candidate-label">${candidateLabel(state.currentCandidate)}</div><span class="field-help">匿名音频</span></div><audio controls preload="metadata" src="${S.escapeHtml(candidate.url)}"></audio></div><div class="context-grid"><div class="context-box"><strong>info · ${S.escapeHtml(state.task.case.language || "未填写 language")}</strong>${S.escapeHtml(state.task.case.info)}</div><div class="context-box"><strong>歌词</strong>${S.escapeHtml(state.task.case.lyrics || "该 Case 未提供歌词文本")}</div></div><nav class="group-tabs" aria-label="评分模块">${groups.map((group, index) => `<button class="group-tab ${index === state.currentGroup ? "active" : ""} ${groupComplete(state.currentCandidate, index) ? "done" : ""}" data-group="${index}"><span>${S.escapeHtml(displayGroupLabel(group))}</span></button>`).join("")}</nav></div>`;
   }
 
   function renderDimension(dimension, answer) {
@@ -432,13 +449,20 @@
     const order = state.rankings[dimension.key];
     const candidateById = new Map(state.task.candidates.map((candidate) => [candidate.blind_id, candidate]));
     const conflicts = state.conflicts.filter((conflict) => conflict.dimension.key === dimension.key);
-    return `<div class="ranking-revealed"><div class="card"><div class="card-header"><div><h2>${S.escapeHtml(dimension.label)} Ranking</h2><div class="field-help">参考该维度整体 MOS 分，拖动候选形成从优到弱的唯一顺序。</div></div><span class="badge">${state.currentRanking + 1}/${dimensions.length}</span></div><div class="card-body">
-      <div data-ranking-summary class="alert ${conflicts.length ? "error" : "success"}"><strong>${conflicts.length ? `本维度发现 ${conflicts.length} 处冲突` : "当前排序无冲突"}</strong>${conflicts.length ? "必须调整分数或排名后才能导出。" : "同分候选仍可保留先后顺序。"}</div>
+    const ties = computeRankingTies().filter((tie) => tie.dimension.key === dimension.key);
+    const revealed = state.rankingSubmitted;
+    const canExport = revealed && !state.conflicts.length && !rankingReasonMissing();
+    const summary = revealed
+      ? `<div data-ranking-summary class="alert ${conflicts.length ? "error" : "success"}"><strong>${conflicts.length ? `本维度发现 ${conflicts.length} 处冲突` : "当前排序无分数冲突"}</strong>${conflicts.length ? "必须调整分数或排名后才能导出。" : "已按对应整体 MOS 分完成检查。"}</div>`
+      : `<div data-ranking-summary class="alert"><strong>盲排阶段：MOS 分暂不展示</strong>请只根据试听结果完成四个 Ranking 维度；提交后再显示 MOS 分并进行一致性检查。</div>`;
+    return `<div class="${revealed ? "ranking-revealed" : "ranking-blind"}"><div class="card"><div class="card-header"><div><h2>${S.escapeHtml(dimension.label)} Ranking</h2><div class="field-help">拖动候选形成从优到弱的唯一顺序，不允许并列。</div></div><span class="badge">${state.currentRanking + 1}/${dimensions.length}</span></div><div class="card-body">
+      ${summary}
       <div class="ranking-card" style="margin-top:14px"><div class="ranking-head"><h3>试听音频</h3><span class="field-help">沿用 MOS 的候选编号</span></div>${Object.entries(aliases).sort((a,b) => a[1].localeCompare(b[1])).map(([id, alias]) => `<div class="audio-row" style="margin-top:8px"><div class="candidate-label">候选 ${alias}</div><audio controls preload="metadata" src="${S.escapeHtml(candidateById.get(id).url)}"></audio></div>`).join("")}</div>
       <div class="ranking-card"><div class="ranking-head"><h3>排名结果</h3><span class="field-help">从左到右：更优 → 相对较弱；拖动卡片调整顺序</span></div><div class="rank-direction"><span>更优</span><i></i><span>相对较弱</span></div><div class="rank-list" data-rank-list>${order.map((id) => `<div class="rank-row" draggable="true" data-rank-id="${id}"><div class="drag-handle" aria-label="拖拽排序" title="拖拽排序"><i></i><i></i><i></i></div><div class="rank-label">候选 ${aliases[id]}<span class="score-peek">MOS ${state.mos[id]?.scores?.[dimension.scoreKey] ?? "—"}</span></div></div>`).join("")}</div></div>
-      <div data-conflict-region>${conflictMarkup(conflicts, aliases)}</div>
-      <label class="field-label" style="margin-top:16px" for="ranking-note">Ranking 统一备注（选填）</label><textarea id="ranking-note" class="ranking-note" placeholder="如需解释整体排序判断，可统一写在这里。">${S.escapeHtml(state.rankingNote)}</textarea>
-      </div></div><div class="footer-actions"><button class="button" data-action="previous-ranking" ${state.currentRanking === 0 ? "disabled" : ""}>← 上一维度</button><span class="status">显示对应整体 MOS 分并实时校验</span>${state.currentRanking < dimensions.length - 1 ? `<button class="button primary" data-action="next-ranking">下一维度 →</button>` : state.rankingSubmitted && !state.conflicts.length ? `<button class="button primary" data-ranking-final-action data-action="export">生成结果 →</button>` : `<button class="button primary" data-ranking-final-action data-action="submit-ranking">检查并完成 Ranking</button>`}</div></div>`;
+      <div data-conflict-region>${revealed ? conflictMarkup(conflicts, aliases) : ""}</div>
+      <div data-tie-region>${revealed ? tieMarkup(ties, aliases) : ""}</div>
+      ${revealed ? `<label data-ranking-note-label class="field-label ${rankingReasonMissing() ? "required" : ""}" style="margin-top:16px" for="ranking-note">Ranking 统一理由${computeRankingTies().length ? "（同分不同排名时必填）" : "（选填）"}</label><textarea id="ranking-note" class="ranking-note ${rankingReasonMissing() ? "input-error" : ""}" placeholder="出现同分但排名不同时，请统一说明排序依据。">${S.escapeHtml(state.rankingNote)}</textarea>` : ""}
+      </div></div><div class="footer-actions"><button class="button" data-action="previous-ranking" ${state.currentRanking === 0 ? "disabled" : ""}>← 上一维度</button><span class="status">${revealed ? "已显示 MOS，正在进行一致性复核" : "盲排阶段 · MOS 分隐藏"}</span>${state.currentRanking < dimensions.length - 1 ? `<button class="button primary" data-action="next-ranking">下一维度 →</button>` : canExport ? `<button class="button primary" data-ranking-final-action data-action="export">生成结果 →</button>` : `<button class="button primary" data-ranking-final-action data-action="submit-ranking">${revealed ? "重新检查 Ranking" : "提交全部 Ranking 并检查"}</button>`}</div></div>`;
   }
 
   function currentRankingAliases() {
@@ -450,6 +474,11 @@
     return `<div class="conflict-card"><h4>冲突位置</h4><ul>${conflicts.map((conflict) => `<li>候选 ${aliases[conflict.higherRankId]} 为 ${conflict.higherScore} 分，却排在 ${conflict.lowerScore} 分的候选 ${aliases[conflict.lowerRankId]} 之前。</li>`).join("")}</ul></div>`;
   }
 
+  function tieMarkup(ties, aliases) {
+    if (!ties.length) return "";
+    return `<div class="conflict-card tie-card"><h4>同分不同排名 · 需填写统一理由</h4><ul>${ties.map((tie) => `<li>${S.escapeHtml(tie.dimension.label)} ${tie.score} 分：${tie.blindIds.map((id) => `候选 ${aliases[id]}`).join("、")}。</li>`).join("")}</ul></div>`;
+  }
+
   function refreshRankingUi() {
     if (state.screen !== "ranking") return;
     const dimension = activeRankingDimensions()[state.currentRanking];
@@ -459,20 +488,32 @@
       const rows = new Map(Array.from(list.querySelectorAll("[data-rank-id]")).map((row) => [row.dataset.rankId, row]));
       order.forEach((id) => { const row = rows.get(id); if (row) list.appendChild(row); });
     }
-    state.conflicts = computeConflicts();
+    state.conflicts = state.rankingSubmitted ? computeConflicts() : [];
     const conflicts = state.conflicts.filter((conflict) => conflict.dimension.key === dimension.key);
+    const ties = state.rankingSubmitted ? computeRankingTies().filter((tie) => tie.dimension.key === dimension.key) : [];
     const summary = root.querySelector("[data-ranking-summary]");
     if (summary) {
-      summary.className = `alert ${conflicts.length ? "error" : "success"}`;
-      summary.innerHTML = `<strong>${conflicts.length ? `本维度发现 ${conflicts.length} 处冲突` : "当前排序无冲突"}</strong>${conflicts.length ? "必须调整分数或排名后才能导出。" : "同分候选仍可保留先后顺序。"}`;
+      if (!state.rankingSubmitted) {
+        summary.className = "alert";
+        summary.innerHTML = "<strong>盲排阶段：MOS 分暂不展示</strong>请只根据试听结果完成四个 Ranking 维度；提交后再显示 MOS 分并进行一致性检查。";
+      } else {
+        summary.className = `alert ${conflicts.length ? "error" : "success"}`;
+        summary.innerHTML = `<strong>${conflicts.length ? `本维度发现 ${conflicts.length} 处冲突` : "当前排序无分数冲突"}</strong>${conflicts.length ? "必须调整分数或排名后才能导出。" : "已按对应整体 MOS 分完成检查。"}`;
+      }
     }
     const region = root.querySelector("[data-conflict-region]");
-    if (region) region.innerHTML = conflictMarkup(conflicts, currentRankingAliases());
+    if (region) region.innerHTML = state.rankingSubmitted ? conflictMarkup(conflicts, currentRankingAliases()) : "";
+    const tieRegion = root.querySelector("[data-tie-region]");
+    if (tieRegion) tieRegion.innerHTML = state.rankingSubmitted ? tieMarkup(ties, currentRankingAliases()) : "";
+    const noteLabel = root.querySelector("[data-ranking-note-label]");
+    const noteInput = root.querySelector("#ranking-note");
+    if (noteLabel) noteLabel.classList.toggle("required", rankingReasonMissing());
+    if (noteInput) noteInput.classList.toggle("input-error", rankingReasonMissing());
     const finalAction = root.querySelector("[data-ranking-final-action]");
     if (finalAction) {
-      const canExport = state.rankingSubmitted && state.conflicts.length === 0;
+      const canExport = state.rankingSubmitted && state.conflicts.length === 0 && !rankingReasonMissing();
       finalAction.dataset.action = canExport ? "export" : "submit-ranking";
-      finalAction.textContent = canExport ? "生成结果 →" : "检查并完成 Ranking";
+      finalAction.textContent = canExport ? "生成结果 →" : state.rankingSubmitted ? "重新检查 Ranking" : "提交全部 Ranking 并检查";
     }
   }
 
@@ -516,7 +557,7 @@
   root.addEventListener("input", (event) => {
     if (event.target.id === "import-input") state.paste = event.target.value;
     if (event.target.matches("[data-note]")) { const answer = answerFor(state.currentCandidate); const value = event.target.value; if (value) answer.notes[event.target.dataset.note] = value; else delete answer.notes[event.target.dataset.note]; event.target.style.height = "auto"; event.target.style.height = `${Math.min(120, Math.max(38, event.target.scrollHeight))}px`; scheduleDraftSave(); }
-    if (event.target.id === "ranking-note") { state.rankingNote = event.target.value; scheduleDraftSave(); }
+    if (event.target.id === "ranking-note") { state.rankingNote = event.target.value; if (state.rankingSubmitted) refreshRankingUi(); scheduleDraftSave(); }
   });
   root.addEventListener("change", (event) => {
     if (event.target.matches("[data-issue]")) {
@@ -593,7 +634,7 @@
     const group = event.target.closest("[data-group]");
     if (group) { state.currentGroup = Number(group.dataset.group); state.validation = []; scheduleDraftSave(); render(); return; }
     const ranking = event.target.closest("[data-ranking]");
-    if (ranking) { state.screen = "ranking"; state.currentRanking = Number(ranking.dataset.ranking); state.conflicts = computeConflicts(); scheduleDraftSave(); render(); return; }
+    if (ranking) { state.screen = "ranking"; state.currentRanking = Number(ranking.dataset.ranking); state.conflicts = state.rankingSubmitted ? computeConflicts() : []; scheduleDraftSave(); render(); return; }
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "import") importValue();
     if (action === "demo-blank") loadDemo("blank");
@@ -606,7 +647,7 @@
       if (errors.length) { render(); jumpToError(errors[0]); S.toast(`当前模块还有 ${errors.length} 项必填内容未完成`, "error"); }
       else if (state.currentGroup < activeGroups().length - 1) { state.currentGroup += 1; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
       else if (state.currentCandidate < 3) { state.currentCandidate += 1; state.currentGroup = 0; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
-      else { const all = validateAllMos(); if (all.length) { state.currentCandidate = all[0].candidateIndex; state.currentGroup = activeGroups().findIndex((item) => item.dimensions.includes(all[0].dimensionKey)); state.validation = all; render(); jumpToError(all[0]); } else { state.screen = "ranking"; state.validation = []; state.conflicts = computeConflicts(); render(); window.scrollTo({ top: 0, behavior: "smooth" }); } }
+      else { const all = validateAllMos(); if (all.length) { state.currentCandidate = all[0].candidateIndex; state.currentGroup = activeGroups().findIndex((item) => item.dimensions.includes(all[0].dimensionKey)); state.validation = all; render(); jumpToError(all[0]); } else { state.screen = "ranking"; state.rankingSubmitted = false; state.validation = []; state.conflicts = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } }
     }
     if (action === "previous-ranking" && state.currentRanking > 0) { state.currentRanking -= 1; render(); }
     if (action === "next-ranking" && state.currentRanking < activeRankingDimensions().length - 1) { state.currentRanking += 1; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -620,6 +661,6 @@
 
   window.addEventListener("beforeunload", () => { if (state.task && state.screen !== "import") saveLocalDraft(state.screen === "export"); });
 
-  if (window.__SB_NOV_TEST__) window.SB_NOV_EVALUATION_TEST = { state, goExport, listLocalHistory, restoreLocalDraft, saveLocalDraft };
+  if (window.__SB_NOV_TEST__) window.SB_NOV_EVALUATION_TEST = { state, goExport, submitRanking, computeRankingTies, rankingReasonMissing, listLocalHistory, restoreLocalDraft, saveLocalDraft, render };
   render();
 })();

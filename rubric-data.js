@@ -1,5 +1,5 @@
 window.SB_NOV_RUBRIC = {
-  "version": "sonicbench-rubric/2026-11-v1",
+  "version": "sonicbench-rubric/2026-11-v2",
   "groups": [
     {
       "key": "musicality",
@@ -411,11 +411,8 @@ window.SB_NOV_RUBRIC = {
     },
     {
       "key": "audio_quality",
-      "label": "整体音质（包含人声）",
-      "labelByCase": {
-        "vocal": "整体音质（包含人声）",
-        "non_vocal": "整体音质"
-      },
+      "label": "基础音质",
+      "labelByCase": null,
       "groupKey": "acoustics",
       "groupLabel": "音质与声学表现",
       "options": [

@@ -257,6 +257,10 @@ audio { width: 100%; height: 42px; }
 .conflict-card { margin-top: 14px; padding: 15px; border: 1px solid #efb7c0; border-radius: 12px; background: var(--danger-soft); }
 .conflict-card h4 { margin: 0 0 8px; color: #952c3a; }
 .conflict-card ul { margin: 0; padding-left: 20px; }
+.conflict-card.tie-card { border-color: #e6c47d; background: #fff9ea; }
+.conflict-card.tie-card h4 { color: #7c4d0b; }
+.field-label.required { color: #a52f3f; }
+.ranking-note.input-error { border-color: #d85c6c; box-shadow: 0 0 0 3px rgba(216, 92, 108, .12); }
 .ranking-note { min-height: 76px; margin-top: 10px; }
 
 .footer-actions { position: sticky; bottom: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.96); box-shadow: 0 -8px 26px rgba(29,78,117,.09); backdrop-filter: blur(12px); }
