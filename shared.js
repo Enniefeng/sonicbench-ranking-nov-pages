@@ -1,10 +1,10 @@
 (function () {
   "use strict";
 
-  const WORK_ORDER_SCHEMA = "sonicbench-work-order/ranking-4-model/2.0";
-  const RESULT_SCHEMA = "sonicbench-annotation-result/ranking-4-model/2.0";
-  const MAPPING_SCHEMA = "sonicbench-mapping/ranking-4-model/2.0";
-  const MODEL_COUNT = 4;
+  const WORK_ORDER_SCHEMA = "sonicbench-work-order/mos-3-model/1.0";
+  const RESULT_SCHEMA = "sonicbench-annotation-result/mos-3-model/1.0";
+  const MAPPING_SCHEMA = "sonicbench-mapping/mos-3-model/1.0";
+  const MODEL_COUNT = 3;
   const CELL_WARNING = 30000;
   const CELL_HARD_LIMIT = 50000;
 

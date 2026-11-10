@@ -7,7 +7,7 @@
   if (!S || !R || !root) return;
 
   const dimensionByKey = new Map(R.dimensions.map((dimension) => [dimension.key, dimension]));
-  const HISTORY_PREFIX = "sonicbench_nov_annotation_history_v1:";
+  const HISTORY_PREFIX = "sonicbench_nov_mos3_annotation_history_v1:";
   const HISTORY_LIMIT = 12;
   let draftTimer = null;
   let draggingRankId = "";
@@ -30,6 +30,8 @@
     baseline: null,
     sourceResult: null,
     result: null,
+    hasExported: false,
+    returnPromptOpen: false,
     validation: [],
     restoredDraft: false
   };
@@ -70,16 +72,18 @@
     state.conflicts = [];
     state.startedAt = new Date().toISOString();
     state.result = null;
+    state.hasExported = false;
+    state.returnPromptOpen = false;
     state.validation = [];
     state.restoredDraft = false;
   }
 
   function validateTask(task) {
     const errors = [];
-    if (!task || task.schema_version !== S.WORK_ORDER_SCHEMA) errors.push("工单 Schema 不匹配，请使用 11 月独立版管理员工具生成的工单");
+    if (!task || task.schema_version !== S.WORK_ORDER_SCHEMA) errors.push("工单 Schema 不匹配，请使用三模型 MOS 管理员工具生成的工单");
     if (!task?.case?.case_id) errors.push("缺少 case.case_id");
     if (!task?.case?.info) errors.push("缺少 case.info");
-    if (!Array.isArray(task?.candidates) || task.candidates.length !== 4) errors.push("必须包含 4 个匿名候选");
+    if (!Array.isArray(task?.candidates) || task.candidates.length !== S.MODEL_COUNT) errors.push(`必须包含 ${S.MODEL_COUNT} 个匿名候选`);
     else task.candidates.forEach((candidate, index) => {
       if (!candidate.blind_id) errors.push(`候选 ${index + 1} 缺少 blind_id`);
       if (!S.isUrl(candidate.url)) errors.push(`候选 ${index + 1} 的音频 URL 无效`);
@@ -133,15 +137,7 @@
         notes: { ...(entry.notes || {}) }
       };
     });
-    activeRankingDimensions().forEach((dimension) => {
-      const entry = result.rankings?.[dimension.key];
-      const order = Array.isArray(entry) ? entry : entry?.final || entry?.order;
-      if (Array.isArray(order) && order.length === 4) state.rankings[dimension.key] = order.slice();
-    });
-    state.rankingNote = result.ranking_note || "";
-    state.rankingSubmitted = true;
     state.startedAt = result.started_at || new Date().toISOString();
-    state.conflicts = computeConflicts();
   }
 
   function answerFor(candidateIndex) { return state.mos[state.task.candidates[candidateIndex].blind_id]; }
@@ -220,7 +216,7 @@
   }
 
   function snapshotAnswers() {
-    return { mos: JSON.parse(JSON.stringify(state.mos)), rankings: JSON.parse(JSON.stringify(state.rankings)), ranking_note: state.rankingNote };
+    return { mos: JSON.parse(JSON.stringify(state.mos)) };
   }
 
   function collectChanges(before, after, path, output) {
@@ -238,8 +234,6 @@
       const answer = state.mos[candidate.blind_id];
       return S.compactObject({ blind_id: candidate.blind_id, scores: answer.scores, issues: answer.issues, notes: answer.notes });
     });
-    const rankings = {};
-    activeRankingDimensions().forEach((dimension) => { rankings[dimension.key] = { final: state.rankings[dimension.key] }; });
     let revision = state.sourceResult ? Number(state.sourceResult.revision || 1) || 1 : 0;
     const audit = Array.isArray(state.sourceResult?.audit) ? JSON.parse(JSON.stringify(state.sourceResult.audit)) : [];
     let changes = [];
@@ -251,9 +245,6 @@
     const compacted = S.compactObject({
       schema_version: S.RESULT_SCHEMA,
       mos,
-      rankings,
-      ranking_note: state.rankingNote,
-      consistency_review: { checked: true, conflict_count: 0 },
       status: "complete",
       started_at: state.startedAt,
       completed_at: state.sourceResult?.completed_at || now,
@@ -266,11 +257,17 @@
   }
 
   function goExport() {
-    submitRanking();
-    if (state.conflicts.length || rankingReasonMissing()) return;
+    const errors = validateAllMos();
+    if (errors.length) {
+      state.screen = "mos"; state.currentCandidate = errors[0].candidateIndex;
+      state.currentGroup = activeGroups().findIndex((group) => group.dimensions.includes(errors[0].dimensionKey));
+      state.validation = errors; render(); jumpToError(errors[0]);
+      S.toast(`还有 ${errors.length} 项 MOS 必填内容未完成`, "error"); return;
+    }
     state.result = buildResult();
     state.screen = "export";
-    saveLocalDraft(true);
+    state.hasExported = false;
+    saveLocalDraft(false);
     render();
   }
 
@@ -302,13 +299,9 @@
       version: 1,
       task: state.task,
       mos: state.mos,
-      rankings: state.rankings,
-      ranking_note: state.rankingNote,
-      ranking_submitted: state.rankingSubmitted,
       current_candidate: state.currentCandidate,
       current_group: state.currentGroup,
-      current_ranking: state.currentRanking,
-      screen: state.screen === "ranking" ? "ranking" : "mos",
+      screen: "mos",
       started_at: state.startedAt,
       source_result: state.sourceResult,
       baseline: state.baseline,
@@ -323,6 +316,7 @@
 
   function scheduleDraftSave() {
     if (mode !== "annotate" || !state.task) return;
+    state.hasExported = false;
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => saveLocalDraft(false), 180);
   }
@@ -336,9 +330,7 @@
     const task = draft.task;
     const dimensions = dimensionsForTask(task);
     const mosDone = (task.candidates || []).filter((candidate) => dimensions.every((dimension) => draft.mos?.[candidate.blind_id]?.scores?.[dimension.key] != null)).length;
-    const rankingTotal = R.rankingDimensions.filter((dimension) => !(dimension.vocalOnly && task.case_type === "non_vocal")).length;
-    const rankingDone = draft.ranking_submitted ? rankingTotal : 0;
-    return { done: mosDone + rankingDone, total: (task.candidates || []).length + rankingTotal };
+    return { done: mosDone, total: (task.candidates || []).length };
   }
 
   function listLocalHistory() {
@@ -364,14 +356,15 @@
     state.rankings = JSON.parse(JSON.stringify(draft.rankings || state.rankings));
     state.rankingNote = draft.ranking_note || "";
     state.rankingSubmitted = Boolean(draft.ranking_submitted);
-    state.currentCandidate = Math.min(3, Math.max(0, Number(draft.current_candidate) || 0));
+    state.currentCandidate = Math.min(S.MODEL_COUNT - 1, Math.max(0, Number(draft.current_candidate) || 0));
     state.currentGroup = Math.max(0, Number(draft.current_group) || 0);
     state.currentRanking = Math.max(0, Number(draft.current_ranking) || 0);
     state.startedAt = draft.started_at || new Date().toISOString();
     state.sourceResult = draft.source_result || null;
     state.baseline = draft.baseline || (state.sourceResult ? snapshotAnswers() : null);
-    state.screen = draft.screen === "ranking" ? "ranking" : "mos";
+    state.screen = "mos";
     state.restoredDraft = true;
+    state.hasExported = Boolean(draft.result_exported);
     state.conflicts = computeConflicts();
     render();
     S.toast("已恢复本机历史记录");
@@ -392,7 +385,7 @@
 
   function renderImport() {
     const isReview = mode === "review";
-    root.innerHTML = `<header class="page-heading"><div><span class="eyebrow">${isReview ? "QUALITY REVIEW" : "ANNOTATION"}</span><h1>${isReview ? "质检验收" : "单 Case 评测"}</h1><p>${isReview ? "粘贴一格结果 JSON，恢复完整 Case 并进行复核。" : "粘贴未标注工单或已有结果 JSON，开始新评测或继续修改。"}</p></div><span class="badge">4 模型 · MOS + Ranking</span></header>
+    root.innerHTML = `<header class="page-heading"><div><span class="eyebrow">${isReview ? "QUALITY REVIEW" : "ANNOTATION"}</span><h1>${isReview ? "质检验收" : "单 Case 评测"}</h1><p>${isReview ? "粘贴一格结果 JSON，恢复完整 Case 并进行复核。" : "粘贴未标注工单或已有结果 JSON，开始新评测或继续修改。"}</p></div><span class="badge">3 模型 · MOS</span></header>
       <section class="card"><div class="card-header"><div><h2>01 ${isReview ? "粘贴结果 JSON" : "粘贴工单或结果 JSON"}</h2><div class="field-help">不需要复制整行，也不会读取右侧业务列。</div></div></div><div class="card-body">
         <textarea id="import-input" class="code-input" placeholder="在此粘贴一整个 JSON 单元格">${S.escapeHtml(state.paste)}</textarea>
         ${state.validation.length ? `<div class="alert error"><strong>无法载入</strong><ul>${state.validation.map((error) => `<li>${S.escapeHtml(error)}</li>`).join("")}</ul></div>` : ""}
@@ -403,9 +396,8 @@
 
   function progress() {
     const mosDone = state.task.candidates.filter((_, index) => candidateComplete(index)).length;
-    const rankingDone = state.rankingSubmitted && !state.conflicts.length && !rankingReasonMissing() ? activeRankingDimensions().length : 0;
-    const total = state.task.candidates.length + activeRankingDimensions().length;
-    return { done: mosDone + rankingDone, total, percent: Math.round((mosDone + rankingDone) / total * 100) };
+    const total = state.task.candidates.length;
+    return { done: mosDone, total, percent: Math.round(mosDone / total * 100) };
   }
 
   function renderProgress() {
@@ -415,7 +407,7 @@
 
   function renderRail() {
     const groups = activeGroups();
-    return `<aside class="card task-rail"><div class="rail-heading"><span class="rail-step-number">1</span><div><strong>MOS 分层评分</strong><small>4 个匿名候选</small></div></div><div class="rail-tree">${state.task.candidates.map((candidate, index) => `<div class="rail-node"><button class="rail-item rail-candidate ${state.screen === "mos" && state.currentCandidate === index ? "active" : ""} ${candidateComplete(index) ? "done" : ""}" data-candidate="${index}"><span class="rail-dot">${String(index + 1).padStart(2, "0")}</span><span>${candidateLabel(index)}</span></button>${state.screen === "mos" && state.currentCandidate === index ? `<div class="rail-subtree">${groups.map((group, groupIndex) => `<button class="rail-subitem ${state.currentGroup === groupIndex ? "active" : ""} ${groupComplete(index, groupIndex) ? "done" : ""}" data-group="${groupIndex}">${S.escapeHtml(displayGroupLabel(group))}</button>`).join("")}</div>` : ""}</div>`).join("")}</div><div class="rail-divider"></div><div class="rail-heading"><span class="rail-step-number">2</span><div><strong>Ranking</strong><small>先盲排，提交后检查</small></div></div><div class="rail-tree">${activeRankingDimensions().map((dimension, index) => `<button class="rail-item rail-ranking ${state.screen === "ranking" && state.currentRanking === index ? "active" : ""} ${state.rankingSubmitted && !state.conflicts.some((conflict) => conflict.dimension.key === dimension.key) && !rankingReasonMissing() ? "done" : ""}" data-ranking="${index}"><span class="rail-dot">${index + 1}</span><span>${S.escapeHtml(dimension.label)}</span></button>`).join("")}</div></aside>`;
+    return `<aside class="card task-rail"><div class="rail-heading"><span class="rail-step-number">1</span><div><strong>MOS 分层评分</strong><small>3 个匿名候选</small></div></div><div class="rail-tree">${state.task.candidates.map((candidate, index) => `<div class="rail-node"><button class="rail-item rail-candidate ${state.currentCandidate === index ? "active" : ""} ${candidateComplete(index) ? "done" : ""}" data-candidate="${index}"><span class="rail-dot">${String(index + 1).padStart(2, "0")}</span><span>${candidateLabel(index)}</span></button>${state.currentCandidate === index ? `<div class="rail-subtree">${groups.map((group, groupIndex) => `<button class="rail-subitem ${state.currentGroup === groupIndex ? "active" : ""} ${groupComplete(index, groupIndex) ? "done" : ""}" data-group="${groupIndex}">${S.escapeHtml(displayGroupLabel(group))}</button>`).join("")}</div>` : ""}</div>`).join("")}</div></aside>`;
   }
 
   function renderContext(candidate, groups) {
@@ -439,7 +431,7 @@
     const answer = answerFor(state.currentCandidate);
     const groups = activeGroups();
     const activeGroup = groups[state.currentGroup] || groups[0];
-    return `<div>${renderContext(candidate, groups)}<section class="card score-group"><div class="group-head"><div><h3>${S.escapeHtml(displayGroupLabel(activeGroup))}</h3><span class="field-help">完成当前模块后进入下一项</span></div><span class="badge">${activeGroup.dimensions.length} 个维度</span></div>${activeGroup.dimensions.map((key) => renderDimension(dimensionByKey.get(key), answer)).join("")}</section><div class="footer-actions"><button class="button" data-action="previous-group" ${state.currentGroup === 0 ? "disabled" : ""}>← 上一模块</button><span class="status">候选 ${String(state.currentCandidate + 1).padStart(2, "0")} · ${state.currentGroup + 1}/${groups.length} 模块</span><button class="button primary" data-action="next-group">${state.currentGroup < groups.length - 1 ? "保存并进入下一模块 →" : state.currentCandidate === 3 ? "完成 MOS，进入 Ranking →" : "保存并评下一首 →"}</button></div></div>`;
+    return `<div>${renderContext(candidate, groups)}<section class="card score-group"><div class="group-head"><div><h3>${S.escapeHtml(displayGroupLabel(activeGroup))}</h3><span class="field-help">完成当前模块后进入下一项</span></div><span class="badge">${activeGroup.dimensions.length} 个维度</span></div>${activeGroup.dimensions.map((key) => renderDimension(dimensionByKey.get(key), answer)).join("")}</section><div class="footer-actions"><button class="button" data-action="previous-group" ${state.currentGroup === 0 ? "disabled" : ""}>← 上一模块</button><span class="status">候选 ${String(state.currentCandidate + 1).padStart(2, "0")} · ${state.currentGroup + 1}/${groups.length} 模块</span><button class="button primary" data-action="next-group">${state.currentGroup < groups.length - 1 ? "保存并进入下一模块 →" : state.currentCandidate === S.MODEL_COUNT - 1 ? "完成 MOS，生成结果 →" : "保存并评下一首 →"}</button></div></div>`;
   }
 
   function renderRanking() {
@@ -535,18 +527,43 @@
   function renderExport() {
     const json = JSON.stringify(state.result);
     const tone = json.length > S.CELL_HARD_LIMIT ? "danger" : json.length > S.CELL_WARNING ? "warning" : "";
-    return `<header class="page-heading"><div><span class="eyebrow">COMPLETE</span><h1>结果已生成</h1><p>复制这一格回填到 annotation_result_json 列，或下载完整 JSON 留档。</p></div><span class="badge">Revision ${state.result.revision}</span></header><section class="card"><div class="card-header"><h2>${S.escapeHtml(state.task.case.case_id)} · 结果 JSON</h2><button class="button" data-action="new-case">导入新 Case</button></div><div class="card-body"><textarea id="result-output" class="code-input result-output" readonly>${S.escapeHtml(json)}</textarea><div class="char-meter ${tone}"><span>${json.length.toLocaleString()} 字符</span><span>${json.length > S.CELL_HARD_LIMIT ? "超过 50,000，不能稳定回填在线表格，请下载 JSON 留档" : json.length > S.CELL_WARNING ? "已超过 30,000，建议确认目标表格限制" : "可回填单元格"}</span></div><div class="toolbar"><button class="button primary" data-action="copy-result" ${json.length > S.CELL_HARD_LIMIT ? "disabled" : ""}>复制结果单元格</button><button class="button" data-action="download-result">下载 JSON</button><button class="button soft" data-action="back-ranking">返回检查</button></div></div></section>`;
+    return `<header class="page-heading"><div><span class="eyebrow">COMPLETE</span><h1>结果已生成</h1><p>复制这一格回填到 annotation_result_json 列，或下载完整 JSON 留档。</p></div><span class="badge">Revision ${state.result.revision}</span></header><section class="card"><div class="card-header"><h2>${S.escapeHtml(state.task.case.case_id)} · 结果 JSON</h2><button class="button" data-action="new-case">导入新 Case</button></div><div class="card-body"><textarea id="result-output" class="code-input result-output" readonly>${S.escapeHtml(json)}</textarea><div class="char-meter ${tone}"><span>${json.length.toLocaleString()} 字符</span><span>${json.length > S.CELL_HARD_LIMIT ? "超过 50,000，不能稳定回填在线表格，请下载 JSON 留档" : json.length > S.CELL_WARNING ? "已超过 30,000，建议确认目标表格限制" : "可回填单元格"}</span></div><div class="toolbar"><button class="button primary" data-action="copy-result" ${json.length > S.CELL_HARD_LIMIT ? "disabled" : ""}>复制结果单元格</button><button class="button" data-action="download-result">下载 JSON</button><button class="button soft" data-action="back-mos">返回评分</button></div></div></section>`;
   }
 
   function renderTask() {
     const historyBanner = mode === "annotate" && (state.restoredDraft || state.sourceResult) ? `<div class="resume-banner"><div><strong>${state.restoredDraft ? "已恢复本机历史记录" : "正在修改已有标注结果"}</strong><span>${state.sourceResult ? `原结果 Revision ${Number(state.sourceResult.revision || 1)}` : "继续上次尚未完成的评分"}</span></div><span class="badge">修改后重新导出</span></div>` : "";
-    root.innerHTML = `${renderProgress()}${historyBanner}<div class="task-layout">${renderRail()}<main>${state.screen === "mos" ? renderMos() : renderRanking()}</main></div>`;
+    root.innerHTML = `${renderProgress()}${historyBanner}<div class="task-layout">${renderRail()}<main>${renderMos()}</main></div>`;
   }
   function render() {
     if (state.screen === "import") renderImport();
     else if (state.screen === "export") root.innerHTML = renderExport();
     else renderTask();
+    if (state.returnPromptOpen) root.insertAdjacentHTML("beforeend", `<div class="return-overlay" role="presentation"><section class="return-dialog" role="dialog" aria-modal="true" aria-labelledby="return-dialog-title"><h2 id="return-dialog-title">当前结果尚未导出</h2><p>评分已保存到本机 Case 历史。返回后可手动恢复，但正式结果仍需复制或下载 JSON 并回填工单。</p><div class="toolbar"><button class="button" data-action="cancel-return">继续标注</button><button class="button primary" data-action="confirm-return">仍然返回首页</button></div></section></div>`);
   }
+
+  function returnToImport() {
+    if (state.task) {
+      clearTimeout(draftTimer);
+      saveLocalDraft(state.hasExported);
+    }
+    Object.assign(state, { screen: "import", paste: "", task: null, mos: {}, rankings: {}, rankingInitial: {}, rankingNote: "", currentGroup: 0, baseline: null, sourceResult: null, result: null, validation: [], restoredDraft: false, hasExported: false, returnPromptOpen: false });
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function requestReturnToImport() {
+    if (!state.task || state.screen === "import" || state.hasExported) return returnToImport();
+    clearTimeout(draftTimer);
+    saveLocalDraft(false);
+    state.returnPromptOpen = true;
+    render();
+  }
+
+  document.addEventListener("click", (event) => {
+    if (mode !== "annotate" || !event.target.closest("[data-home-link]")) return;
+    event.preventDefault();
+    requestReturnToImport();
+  }, true);
 
   function updateDimensionRow(key) {
     const node = root.querySelector(`[data-dimension-row="${CSS.escape(key)}"]`);
@@ -646,20 +663,22 @@
       const errors = validateGroup(state.currentCandidate, state.currentGroup); state.validation = errors;
       if (errors.length) { render(); jumpToError(errors[0]); S.toast(`当前模块还有 ${errors.length} 项必填内容未完成`, "error"); }
       else if (state.currentGroup < activeGroups().length - 1) { state.currentGroup += 1; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
-      else if (state.currentCandidate < 3) { state.currentCandidate += 1; state.currentGroup = 0; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
-      else { const all = validateAllMos(); if (all.length) { state.currentCandidate = all[0].candidateIndex; state.currentGroup = activeGroups().findIndex((item) => item.dimensions.includes(all[0].dimensionKey)); state.validation = all; render(); jumpToError(all[0]); } else { state.screen = "ranking"; state.rankingSubmitted = false; state.validation = []; state.conflicts = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); } }
+      else if (state.currentCandidate < S.MODEL_COUNT - 1) { state.currentCandidate += 1; state.currentGroup = 0; state.validation = []; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+      else goExport();
     }
     if (action === "previous-ranking" && state.currentRanking > 0) { state.currentRanking -= 1; render(); }
     if (action === "next-ranking" && state.currentRanking < activeRankingDimensions().length - 1) { state.currentRanking += 1; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
     if (action === "submit-ranking") submitRanking();
     if (action === "export") goExport();
-    if (action === "copy-result") navigator.clipboard.writeText(JSON.stringify(state.result)).then(() => S.toast("已复制结果 JSON"), () => S.toast("复制失败，请手动选择", "error"));
-    if (action === "download-result") S.download(`${state.task.case.case_id}-${S.dateStamp()}.json`, JSON.stringify(state.result, null, 2), "application/json");
-    if (action === "back-ranking") { state.screen = "ranking"; render(); }
-    if (action === "new-case") { Object.assign(state, { screen: "import", paste: "", task: null, mos: {}, rankings: {}, rankingInitial: {}, rankingNote: "", currentGroup: 0, baseline: null, sourceResult: null, result: null, validation: [], restoredDraft: false }); render(); }
+    if (action === "copy-result") navigator.clipboard.writeText(JSON.stringify(state.result)).then(() => { state.hasExported = true; saveLocalDraft(true); S.toast("已复制结果 JSON"); }, () => S.toast("复制失败，请手动选择", "error"));
+    if (action === "download-result") { S.download(`${state.task.case.case_id}-${S.dateStamp()}.json`, JSON.stringify(state.result, null, 2), "application/json"); state.hasExported = true; saveLocalDraft(true); }
+    if (action === "back-mos") { state.screen = "mos"; state.currentCandidate = S.MODEL_COUNT - 1; state.currentGroup = activeGroups().length - 1; render(); }
+    if (action === "new-case") requestReturnToImport();
+    if (action === "cancel-return") { state.returnPromptOpen = false; render(); }
+    if (action === "confirm-return") returnToImport();
   });
 
-  window.addEventListener("beforeunload", () => { if (state.task && state.screen !== "import") saveLocalDraft(state.screen === "export"); });
+  window.addEventListener("beforeunload", () => { if (state.task && state.screen !== "import") saveLocalDraft(state.hasExported); });
 
   if (window.__SB_NOV_TEST__) window.SB_NOV_EVALUATION_TEST = { state, goExport, submitRanking, computeRankingTies, rankingReasonMissing, listLocalHistory, restoreLocalDraft, saveLocalDraft, render };
   render();
