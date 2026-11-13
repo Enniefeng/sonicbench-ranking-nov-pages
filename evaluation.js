@@ -35,6 +35,15 @@
     validation: [],
     restoredDraft: false
   };
+  if (mode === "review") {
+    try {
+      const transferred = sessionStorage.getItem("sonicbench_nov_review_transfer_v1");
+      if (transferred) {
+        state.paste = transferred;
+        sessionStorage.removeItem("sonicbench_nov_review_transfer_v1");
+      }
+    } catch (error) { /* private browsing may disable sessionStorage */ }
+  }
 
   function candidateLabel(index) { return `候选 ${String(index + 1).padStart(2, "0")}`; }
   function isOverallDimension(dimension) { return dimension?.key === "overall" || dimension?.key?.endsWith("_overall"); }
