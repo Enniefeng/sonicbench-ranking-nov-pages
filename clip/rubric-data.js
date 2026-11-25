@@ -275,6 +275,7 @@ window.SB_NOV_RUBRIC = {
     },
     {
       "key": "ending",
+      "observations": [{"id":"ENDING_LYRICS_UNFINISHED","label":"存在歌词未唱完的情况"}],
       "label": "收尾与结束处理",
       "groupKey": "musicality",
       "options": [
@@ -950,6 +951,10 @@ window.SB_NOV_RUBRIC = {
     },
     {
       "key": "instruction_duration",
+      "observations": [
+        {"id":"DURATION_MET_LYRICS_UNFINISHED","label":"存在时长遵循但歌词未唱完的情况"},
+        {"id":"DURATION_MISSED_LYRICS_UNFINISHED","label":"时长未遵循歌词也未唱完"}
+      ],
       "label": "总时长遵循",
       "groupKey": "instruction",
       "options": [

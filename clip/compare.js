@@ -71,7 +71,7 @@
 
   function issueLabels(dimension, ids, caseType) {
     const options = dimension.optionsByCase?.[caseType] || dimension.options || [];
-    const names = new Map(options.map((option) => [option.id, option.label]));
+    const names = new Map([...options, ...(dimension.observations || [])].map((option) => [option.id, option.label]));
     return ids.map((id) => names.get(id) || id);
   }
 
