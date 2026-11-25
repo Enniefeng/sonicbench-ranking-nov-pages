@@ -96,10 +96,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "harmony",
@@ -141,10 +141,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "rhythm",
@@ -186,10 +186,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "structure",
@@ -227,10 +227,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "arrangement",
@@ -268,10 +268,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "ending",
@@ -310,10 +310,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "lyrics_melody_relation",
@@ -347,10 +347,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "musicality_overall",
@@ -408,10 +408,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "instrument_realism",
@@ -449,10 +449,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "mix_master",
@@ -498,10 +498,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "technical_consistency",
@@ -547,10 +547,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "acoustics_overall",
@@ -604,10 +604,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "singing_performance",
@@ -653,10 +653,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "emotional_expression",
@@ -694,10 +694,10 @@ window.SB_NOV_RUBRIC = {
       ],
       "scoreLabel": "评分",
       "issueLabel": "低分/未遵循问题（多选）",
-      "noteLabel": "备注（低分/勾选问题必填）",
+      "noteLabel": "备注（选填；选择“其他”时可补充说明）",
       "allowNA": true,
       "issueRule": "low3",
-      "noteRule": "low3"
+      "noteRule": "optional"
     },
     {
       "key": "vocals_overall",

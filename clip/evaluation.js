@@ -325,8 +325,10 @@
       updated_at: new Date().toISOString()
     };
     try {
-      localStorage.setItem(historyKey(state.task), JSON.stringify(payload));
-      pruneLocalHistory();
+      const key = historyKey(state.task);
+      const isNew = localStorage.getItem(key) === null;
+      localStorage.setItem(key, JSON.stringify(payload));
+      if (isNew) pruneLocalHistory();
     } catch (error) { /* evaluation must continue when localStorage is unavailable */ }
   }
 
@@ -547,9 +549,21 @@
     return `<header class="page-heading"><div><span class="eyebrow">COMPLETE</span><h1>结果已生成</h1><p>复制这一格回填到 annotation_result_json 列，或下载完整 JSON 留档。</p></div><span class="badge">Revision ${state.result.revision}</span></header><section class="card"><div class="card-header"><h2>${S.escapeHtml(state.task.case.case_id)} · 结果 JSON</h2><button class="button" data-action="new-case">导入新 Case</button></div><div class="card-body"><textarea id="result-output" class="code-input result-output" readonly>${S.escapeHtml(json)}</textarea><div class="char-meter ${tone}"><span>${json.length.toLocaleString()} 字符</span><span>${json.length > S.CELL_HARD_LIMIT ? "超过 50,000，不能稳定回填在线表格，请下载 JSON 留档" : json.length > S.CELL_WARNING ? "已超过 30,000，建议确认目标表格限制" : "可回填单元格"}</span></div><div class="toolbar"><button class="button primary" data-action="copy-result" ${json.length > S.CELL_HARD_LIMIT ? "disabled" : ""}>复制结果单元格</button><button class="button" data-action="download-result">下载 JSON</button><button class="button soft" data-action="back-mos">返回评分</button></div></div></section>`;
   }
 
+  let renderedTask, renderedCandidate;
   function renderTask() {
     const historyBanner = mode === "annotate" && (state.restoredDraft || state.sourceResult) ? `<div class="resume-banner"><div><strong>${state.restoredDraft ? "已恢复本机历史记录" : "正在修改已有标注结果"}</strong><span>${state.sourceResult ? `原结果 Revision ${Number(state.sourceResult.revision || 1)}` : "继续上次尚未完成的评分"}</span></div><span class="badge">修改后重新导出</span></div>` : "";
-    root.innerHTML = `${renderProgress()}${historyBanner}<div class="task-layout">${renderRail()}<main>${renderMos()}</main></div>`;
+    const markup = `${renderProgress()}${historyBanner}<div class="task-layout">${renderRail()}<main>${renderMos()}</main></div>`;
+    if (state.task === renderedTask && state.currentCandidate === renderedCandidate && root.querySelector(".audio-row audio")) {
+      // Template contents are inert. Keep the connected player and its playback buffer.
+      const next = document.createElement("template");
+      next.innerHTML = markup;
+      for (const selector of [".progress-shell", ".task-rail", ".group-tabs", ".score-group", ".footer-actions"]) {
+        root.querySelector(selector).replaceWith(next.content.querySelector(selector));
+      }
+      root.querySelector(".return-overlay")?.remove();
+    } else root.innerHTML = markup;
+    renderedTask = state.task;
+    renderedCandidate = state.currentCandidate;
   }
   function render() {
     if (state.screen === "import") renderImport();
